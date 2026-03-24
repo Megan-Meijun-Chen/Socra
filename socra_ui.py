@@ -76,6 +76,7 @@ T = {
         "followup_label":    "💬 Ask a follow-up",
         "followup_ph":       "Not clear on something? Ask here…",
         "followup_btn":      "Ask",
+        "followup_model":    "Answer with",
         "sidebar_title":     "📋 History",
         "sidebar_empty":     "No past questions yet.",
         "sidebar_clear":     "Clear all",
@@ -131,6 +132,7 @@ T = {
         "followup_label":    "💬 追问",
         "followup_ph":       "有不明白的地方？继续问……",
         "followup_btn":      "提问",
+        "followup_model":    "由谁回答",
         "sidebar_title":     "📋 历史记录",
         "sidebar_empty":     "暂无历史记录。",
         "sidebar_clear":     "清空全部",
@@ -642,6 +644,17 @@ if result:
                 unsafe_allow_html=True,
             )
 
+        # Model selector for follow-up
+        available_models = st.session_state.active_models or [model_a, model_b]
+        fu_model_options = [f"{icon(m)} {m}" for m in available_models]
+        fu_model_choice  = st.radio(
+            t("followup_model"),
+            options=fu_model_options,
+            horizontal=True,
+            key="fu_model_radio",
+        )
+        fu_model = available_models[fu_model_options.index(fu_model_choice)]
+
         fu_col1, fu_col2 = st.columns([4, 1])
         with fu_col1:
             fu_input = st.text_input(
@@ -658,9 +671,6 @@ if result:
             )
 
         if fu_btn and fu_input.strip():
-            # Fix 2: alternate between model_a and model_b each follow-up
-            models       = st.session_state.active_models or [model_a, model_b]
-            fu_model     = models[len(st.session_state.followups) % 2]
             with st.spinner("…"):
                 fu_result = core.run_followup(
                     original_question = st.session_state.active_q,
@@ -669,7 +679,6 @@ if result:
                     model             = fu_model,
                     lang              = st.session_state.lang,
                 )
-            # Fix 3: show error instead of silently dropping it
             if fu_result["ok"]:
                 st.session_state.followups.append({
                     "question": fu_input.strip(),
