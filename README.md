@@ -161,7 +161,7 @@ socra/
 ### 1. Clone the repo
 
 ```bash
-git clone https://github.com/Megan-Chen/socra.git
+git clone https://github.com/Megan-Meijun-Chen/socra.git
 cd socra
 ```
 
@@ -286,7 +286,7 @@ When a question image is provided, it is re-attached to every model call in ever
 
 ## About
 
-Built by [Megan Chen](https://github.com/Megan-Chen) as an independent AI project.
+Built by [Megan Chen](https://github.com/Megan-Meijun-Chen) as an independent AI project.
 
 Inspired by: *Improving Factuality and Reasoning in Language Models through Multiagent Debate* (Du et al., 2023, MIT/CMU)
 
