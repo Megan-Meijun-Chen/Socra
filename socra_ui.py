@@ -625,50 +625,61 @@ if result:
     )
 
     # ── Follow-up conversation ────────────────────────────
-    st.markdown('<div class="followup-box">', unsafe_allow_html=True)
-    st.markdown(f'<p class="sec-label">{t("followup_label")}</p>', unsafe_allow_html=True)
+    # Fix 1: use st.container(border=True) instead of raw HTML div —
+    #         HTML divs don't wrap Streamlit widgets in practice.
+    with st.container(border=True):
+        st.markdown(f'<p class="sec-label">{t("followup_label")}</p>', unsafe_allow_html=True)
 
-    for fu in st.session_state.followups:
-        st.markdown(f"**{fu['question']}**")
-        st.markdown(
-            f'<div class="followup-answer">{fu["answer"].replace(chr(10), "<br>")}</div>',
-            unsafe_allow_html=True,
-        )
-
-    fu_col1, fu_col2 = st.columns([4, 1])
-    with fu_col1:
-        fu_input = st.text_input(
-            "followup",
-            label_visibility="collapsed",
-            placeholder=t("followup_ph"),
-            key="fu_input",
-        )
-    with fu_col2:
-        fu_btn = st.button(
-            t("followup_btn"),
-            disabled=not fu_input.strip(),
-            use_container_width=True,
-        )
-
-    if fu_btn and fu_input.strip():
-        fu_model = st.session_state.active_models[0] if st.session_state.active_models else model_a
-        with st.spinner("…"):
-            fu_result = core.run_followup(
-                original_question = st.session_state.active_q,
-                debate_result     = result,
-                followup_question = fu_input.strip(),
-                model             = fu_model,
-                lang              = st.session_state.lang,
+        for fu in st.session_state.followups:
+            answered_by = fu.get("model", "")
+            st.markdown(f"**{fu['question']}**")
+            st.markdown(
+                f'<div class="followup-answer">'
+                f'{fu["answer"].replace(chr(10), "<br>")}'
+                f'<div style="font-size:0.72rem;color:#94a3b8;margin-top:6px">'
+                f'{icon(answered_by)} {answered_by}</div>'
+                f'</div>',
+                unsafe_allow_html=True,
             )
-        if fu_result["ok"]:
-            st.session_state.followups.append({
-                "question": fu_input.strip(),
-                "answer":   fu_result["answer"],
-                "cost":     fu_result["cost"],
-            })
-        st.rerun()
 
-    st.markdown('</div>', unsafe_allow_html=True)
+        fu_col1, fu_col2 = st.columns([4, 1])
+        with fu_col1:
+            fu_input = st.text_input(
+                "followup",
+                label_visibility="collapsed",
+                placeholder=t("followup_ph"),
+                key="fu_input",
+            )
+        with fu_col2:
+            fu_btn = st.button(
+                t("followup_btn"),
+                disabled=not fu_input.strip(),
+                use_container_width=True,
+            )
+
+        if fu_btn and fu_input.strip():
+            # Fix 2: alternate between model_a and model_b each follow-up
+            models       = st.session_state.active_models or [model_a, model_b]
+            fu_model     = models[len(st.session_state.followups) % 2]
+            with st.spinner("…"):
+                fu_result = core.run_followup(
+                    original_question = st.session_state.active_q,
+                    debate_result     = result,
+                    followup_question = fu_input.strip(),
+                    model             = fu_model,
+                    lang              = st.session_state.lang,
+                )
+            # Fix 3: show error instead of silently dropping it
+            if fu_result["ok"]:
+                st.session_state.followups.append({
+                    "question": fu_input.strip(),
+                    "answer":   fu_result["answer"],
+                    "cost":     fu_result["cost"],
+                    "model":    fu_model,
+                })
+            else:
+                st.error(f"❌ {fu_result['answer']}")
+            st.rerun()
 
 elif not run_btn:
     st.markdown(
