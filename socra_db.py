@@ -11,6 +11,7 @@ Schema:
 
 import sqlite3, json, pathlib
 from datetime import datetime
+from typing import List, Optional
 
 _DB_PATH = pathlib.Path(__file__).parent / "socra_history.db"
 
@@ -79,7 +80,7 @@ def save_session(question: str, result: dict, lang: str = "zh") -> int:
 # Read
 # ═══════════════════════════════════════════════════════════
 
-def get_history(limit: int = 30) -> list[dict]:
+def get_history(limit: int = 30) -> List[dict]:
     """Return recent sessions, newest first. Lightweight — no result_json."""
     init_db()
     con = sqlite3.connect(_DB_PATH)
@@ -94,7 +95,7 @@ def get_history(limit: int = 30) -> list[dict]:
     con.close()
     return [dict(r) for r in rows]
 
-def get_session(session_id: int) -> dict | None:
+def get_session(session_id: int) -> Optional[dict]:
     """Return full session including result_json parsed back to dict."""
     init_db()
     con = sqlite3.connect(_DB_PATH)

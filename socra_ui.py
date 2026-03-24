@@ -263,6 +263,7 @@ defaults = {
     "followups":     [],
     "active_q":      "",
     "active_models": [],
+    "fu_input_key":  0,   # increment to clear the follow-up text input
 }
 for k, v in defaults.items():
     if k not in st.session_state:
@@ -347,6 +348,7 @@ with st.sidebar:
         st.session_state.followups     = []
         st.session_state.active_q      = ""
         st.session_state.active_models = []
+        st.session_state.fu_input_key  += 1
         st.rerun()
 
     history = db.get_history(30)
@@ -661,7 +663,7 @@ if result:
                 "followup",
                 label_visibility="collapsed",
                 placeholder=t("followup_ph"),
-                key="fu_input",
+                key=f"fu_input_{st.session_state.fu_input_key}",
             )
         with fu_col2:
             fu_btn = st.button(
@@ -686,6 +688,7 @@ if result:
                     "cost":     fu_result["cost"],
                     "model":    fu_model,
                 })
+                st.session_state.fu_input_key += 1  # clears the text input
             else:
                 st.error(f"❌ {fu_result['answer']}")
             st.rerun()
