@@ -70,31 +70,51 @@ Rules:
 - If you find an error in YOUR OWN previous answer, acknowledge it and correct yourself
 - If both answers are essentially correct, confirm this clearly
 - Be direct — accuracy matters more than politeness
+- agreement_score: 0 = completely different answers, 100 = fully identical answers
+- key_disagreement: the single most important point of disagreement (null if you agree)
 {lang_instruction}
 Output ONLY valid JSON — no markdown wrapping:
 {{
-  "agrees":         <true or false>,
-  "critique":       "specific evaluation — what is right, what is wrong, and why",
-  "refined_answer": "your current best answer (updated if you found errors, same as before if still correct)"
+  "agrees":           <true or false>,
+  "agreement_score":  <integer 0-100>,
+  "key_disagreement": "the specific point you disagree on, or null if you agree",
+  "critique":         "specific evaluation — what is right, what is wrong, and why",
+  "refined_answer":   "your current best answer (updated if you found errors, same if still correct)"
 }}"""
 
 _SYNTHESIS_BASE = """\
 You are summarizing a multi-AI verification debate concisely.
 {lang_instruction}
-Output valid JSON only — no markdown wrapping."""
+Output valid JSON only — no markdown wrapping:
+{{
+  "final_answer":        "the best answer based on the full debate, clear and complete",
+  "verification_summary":"1-2 sentences describing what happened in the debate",
+  "key_disagreement":    "the main point they disagreed on during debate, or null if they agreed throughout"
+}}"""
+
+_FOLLOWUP_BASE = """\
+You are helping a student who just received a verified answer from a multi-AI debate.
+Below is the original question and a summary of the debate result.
+Answer their follow-up question clearly and helpfully.
+{lang_instruction}
+Output ONLY valid JSON — no markdown wrapping:
+{{
+  "answer": "your complete response to the follow-up question"
+}}"""
 
 _LANG_LINES = {
     "zh": "IMPORTANT: You must write ALL your responses entirely in Simplified Chinese (简体中文). Do not use English.",
     "en": "IMPORTANT: You must write ALL your responses entirely in English.",
 }
 
-def _build_systems(lang: str = "zh") -> tuple[str, str, str]:
-    """Return (ROUND0_SYSTEM, DEBATE_SYSTEM, SYNTHESIS_SYSTEM) with lang baked in."""
+def _build_systems(lang: str = "zh") -> tuple[str, str, str, str]:
+    """Return (ROUND0_SYSTEM, DEBATE_SYSTEM, SYNTHESIS_SYSTEM, FOLLOWUP_SYSTEM) with lang baked in."""
     line = _LANG_LINES.get(lang, _LANG_LINES["zh"])
     return (
         _ROUND0_BASE.format(lang_instruction=line),
         _DEBATE_BASE.format(lang_instruction=line),
         _SYNTHESIS_BASE.format(lang_instruction=line),
+        _FOLLOWUP_BASE.format(lang_instruction=line),
     )
 
 # ═══════════════════════════════════════════════════════════
@@ -241,12 +261,12 @@ def run_debate(
 
     Returns:
       {converged, converged_at_round, final_answer, verification_summary,
-       debate_log, total_cost, model_a, model_b}
+       key_disagreement, debate_log, total_cost, model_a, model_b}
     """
     debate_log  = []
     total_cost  = 0.0
     prompt_r0   = f"Question: {question}"
-    R0_SYS, DEBATE_SYS, SYNTH_SYS = _build_systems(lang)
+    R0_SYS, DEBATE_SYS, SYNTH_SYS, _ = _build_systems(lang)
 
     # ── Round 0: both models answer independently (parallel) ──
     def _answer(model):
@@ -294,7 +314,6 @@ def run_debate(
                 f"Evaluate and respond in the required JSON format."
             )
             try:
-                # Re-attach image so models can re-examine the original question image
                 parsed, it, ot, cost = call_model(model, DEBATE_SYS, prompt, image_b64, image_mime)
                 return {"ok": True, "data": parsed, "cost": cost}
             except Exception as e:
@@ -327,14 +346,16 @@ def run_debate(
         if a_agrees and b_agrees:
             if on_update:
                 on_update("converged", {"round": rnd})
-            final, summary, sc = _synthesize(
-                question, debate_log, model_a, model_b, converged=True, synth_sys=SYNTH_SYS
+            final, summary, key_dis, sc = _synthesize(
+                question, debate_log, model_a, model_b,
+                converged=True, synth_sys=SYNTH_SYS, synth_model=model_a,
             )
             return {
                 "converged": True,
                 "converged_at_round": rnd,
                 "final_answer": final,
                 "verification_summary": summary,
+                "key_disagreement": key_dis,
                 "debate_log": debate_log,
                 "total_cost": total_cost + sc,
                 "model_a": model_a,
@@ -344,14 +365,16 @@ def run_debate(
     # Max rounds reached without full convergence
     if on_update:
         on_update("max_rounds", {})
-    final, summary, sc = _synthesize(
-        question, debate_log, model_a, model_b, converged=False, synth_sys=SYNTH_SYS
+    final, summary, key_dis, sc = _synthesize(
+        question, debate_log, model_a, model_b,
+        converged=False, synth_sys=SYNTH_SYS, synth_model=model_a,
     )
     return {
         "converged": False,
         "converged_at_round": None,
         "final_answer": final,
         "verification_summary": summary,
+        "key_disagreement": key_dis,
         "debate_log": debate_log,
         "total_cost": total_cost + sc,
         "model_a": model_a,
@@ -360,26 +383,19 @@ def run_debate(
 
 
 def _synthesize(
-    question: str,
-    debate_log: list,
-    model_a: str,
-    model_b: str,
-    converged: bool,
-    synth_sys: str = "",
-) -> tuple[str, str, float]:
-    """Generate final answer + verification summary via Claude."""
-    if not ANTHROPIC_API_KEY:
-        # Fallback: use last refined answer from model_a
-        last = debate_log[-1]["responses"].get(model_a, {})
-        if last.get("ok"):
-            d   = last["data"]
-            ans = d.get("refined_answer") or d.get("answer", "")
-            return ans, "（Synthesis unavailable — Claude API not configured）", 0.0
-        return "", "Synthesis unavailable.", 0.0
-
-    import anthropic
-    client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
-
+    question:    str,
+    debate_log:  list,
+    model_a:     str,
+    model_b:     str,
+    converged:   bool,
+    synth_sys:   str = "",
+    synth_model: str = "Claude",
+) -> tuple[str, str, str, float]:
+    """
+    Generate final answer + verification summary using one of the chosen models.
+    Returns (final_answer, verification_summary, key_disagreement, cost).
+    synth_model defaults to model_a — no longer hard-coded to Claude.
+    """
     lines = [f"Question: {question}\n"]
     for entry in debate_log:
         lines.append(f"Round {entry['round']} ({entry['type']}):")
@@ -390,7 +406,10 @@ def _synthesize(
                     lines.append(f"  {model}: {d.get('answer', '')}")
                 else:
                     agree_str = "AGREES" if d.get("agrees") else "DISAGREES"
-                    lines.append(f"  {model}: {agree_str} — {d.get('critique', '')}")
+                    score     = d.get("agreement_score", "?")
+                    lines.append(f"  {model}: {agree_str} (score {score}) — {d.get('critique', '')}")
+                    if d.get("key_disagreement"):
+                        lines.append(f"    Key disagreement: {d['key_disagreement']}")
                     if d.get("refined_answer"):
                         lines.append(f"    → Refined: {d['refined_answer']}")
         lines.append("")
@@ -403,24 +422,74 @@ def _synthesize(
     meta = (
         "\n".join(lines)
         + f"\nStatus: {status_line}\n\n"
-        + 'Provide JSON: {"final_answer": "...", "verification_summary": "..."}\n'
-        + "final_answer: the best answer based on the debate (clear and complete).\n"
-        + "verification_summary: 1-2 sentences describing what happened in the debate."
+        + "Provide the required JSON with final_answer, verification_summary, and key_disagreement."
+    )
+
+    # Use whichever model was chosen — no more Claude-only synthesis
+    sys = synth_sys or _build_systems("zh")[2]
+
+    # Fallback chain: try synth_model first, then any available model
+    fallback_order = [synth_model, model_a, model_b, "Claude", "GPT-4", "Gemini"]
+    seen = set()
+    for m in fallback_order:
+        if m in seen or m not in _CALLERS:
+            continue
+        seen.add(m)
+        api_keys = {"Claude": ANTHROPIC_API_KEY, "GPT-4": OPENAI_API_KEY, "Gemini": GOOGLE_API_KEY}
+        if not api_keys.get(m, ""):
+            continue
+        try:
+            parsed, it, ot, cost = call_model(m, sys, meta)
+            return (
+                parsed.get("final_answer", ""),
+                parsed.get("verification_summary", ""),
+                parsed.get("key_disagreement") or "",
+                cost,
+            )
+        except Exception:
+            continue
+
+    # Hard fallback: use last refined answer
+    last = debate_log[-1]["responses"].get(model_a, {})
+    if last.get("ok"):
+        d   = last["data"]
+        ans = d.get("refined_answer") or d.get("answer", "")
+        return ans, "Synthesis unavailable.", "", 0.0
+    return "", "Synthesis unavailable.", "", 0.0
+
+
+# ═══════════════════════════════════════════════════════════
+# Follow-up conversation
+# ═══════════════════════════════════════════════════════════
+
+def run_followup(
+    original_question: str,
+    debate_result:     dict,
+    followup_question: str,
+    model:             str,
+    lang:              str = "zh",
+) -> dict:
+    """
+    Answer a follow-up question using one model, with the full debate as context.
+    Returns {"answer": str, "cost": float, "ok": bool}.
+    """
+    _, _, _, FOLLOWUP_SYS = _build_systems(lang)
+
+    # Build context from the debate
+    final   = debate_result.get("final_answer", "")
+    summary = debate_result.get("verification_summary", "")
+    model_a = debate_result.get("model_a", "")
+    model_b = debate_result.get("model_b", "")
+
+    prompt = (
+        f"Original question: {original_question}\n\n"
+        f"Verified answer from debate between {model_a} and {model_b}:\n{final}\n\n"
+        f"Debate summary: {summary}\n\n"
+        f"Student follow-up question: {followup_question}"
     )
 
     try:
-        msg  = client.messages.create(
-            model="claude-opus-4-5-20251101",
-            max_tokens=700,
-            system=synth_sys or _build_systems("zh")[2],
-            messages=[{"role": "user", "content": meta}],
-        )
-        cost   = calc_cost("Claude", msg.usage.input_tokens, msg.usage.output_tokens)
-        parsed = parse_json(msg.content[0].text)
-        return (
-            parsed.get("final_answer", ""),
-            parsed.get("verification_summary", ""),
-            cost,
-        )
+        parsed, it, ot, cost = call_model(model, FOLLOWUP_SYS, prompt)
+        return {"ok": True, "answer": parsed.get("answer", ""), "cost": cost}
     except Exception as e:
-        return "", f"Synthesis failed: {e}", 0.0
+        return {"ok": False, "answer": str(e), "cost": 0.0}

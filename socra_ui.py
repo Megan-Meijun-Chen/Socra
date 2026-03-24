@@ -10,6 +10,7 @@ Run:
 
 import streamlit as st
 import socra_core as core
+import socra_db   as db
 
 # ═══════════════════════════════════════════════════════════
 # Page config  (must be first Streamlit call)
@@ -19,7 +20,7 @@ st.set_page_config(
     page_title="Socra – AI Answer Verifier",
     page_icon="✦",
     layout="centered",
-    initial_sidebar_state="collapsed",
+    initial_sidebar_state="expanded",
 )
 
 # ═══════════════════════════════════════════════════════════
@@ -37,6 +38,11 @@ T = {
         "err_too_many":      "Please uncheck one model (need exactly 2, currently {n} selected).",
         "question_label":    "Your question",
         "question_ph":       "Ask anything — math, logic, facts… anything you want two AIs to cross-check",
+        "image_label":       "📷 Upload image (optional)",
+        "image_caption":     "Attach a photo of your question",
+        "image_attached":    "📷 Image attached: {name}",
+        "image_only_q":      "Please analyze and answer the question shown in the image.",
+        "status_image":      "📷 Image included",
         "run_btn":           "▶ Verify",
         "hint_models":       "max 3 debate rounds",
         "status_running":    "🔍 Verifying...",
@@ -56,6 +62,8 @@ T = {
         "badge_disputed":    "⚠️ Diverged — models did not fully agree (summary below)",
         "answer_label_ok":   "✅ Verified Answer",
         "answer_label_fail": "⚠️ Best Answer (diverged)",
+        "key_disagree_label":"⚔️ Key Disagreement",
+        "agreement_score":   "Agreement score",
         "expand_debate":     "📖 Show full debate",
         "meta_cost":         "Total cost",
         "empty_title":       "Enter a question to start AI cross-verification",
@@ -65,11 +73,15 @@ T = {
         "refined_label":     "✏️ Refined answer:",
         "agrees_tag":        "✅ Agrees",
         "disagrees_tag":     "❌ Disagrees",
-        "image_label":       "📷 Upload image (optional)",
-        "image_caption":     "Attach a photo of your question",
-        "image_attached":    "📷 Image attached: {name}",
-        "image_only_q":      "Please analyze and answer the question shown in the image.",
-        "status_image":      "📷 Image included",
+        "followup_label":    "💬 Ask a follow-up",
+        "followup_ph":       "Not clear on something? Ask here…",
+        "followup_btn":      "Ask",
+        "sidebar_title":     "📋 History",
+        "sidebar_empty":     "No past questions yet.",
+        "sidebar_clear":     "Clear all",
+        "sidebar_verified":  "✅",
+        "sidebar_disputed":  "⚠️",
+        "new_question":      "+ New question",
     },
     "zh": {
         "subtitle":          "不确定 AI 的答案对不对？让另一个 AI 来挑战它。",
@@ -81,6 +93,11 @@ T = {
         "err_too_many":      "已选 {n} 个，请取消其中一个（需要恰好 2 个）。",
         "question_label":    "你的问题",
         "question_ph":       "输入任何问题 — 数学题、逻辑题、事实问题……任何你想让两个 AI 交叉验证的内容",
+        "image_label":       "📷 上传图片（可选）",
+        "image_caption":     "上传题目截图或拍照",
+        "image_attached":    "📷 已上传图片：{name}",
+        "image_only_q":      "请分析并回答图片中的问题。",
+        "status_image":      "📷 已附图片",
         "run_btn":           "▶ 开始验证",
         "hint_models":       "最多 3 轮辩论",
         "status_running":    "🔍 验证中...",
@@ -100,6 +117,8 @@ T = {
         "badge_disputed":    "⚠️ 存在分歧 — 模型未完全一致（以下为综合结论）",
         "answer_label_ok":   "✅ 验证结论",
         "answer_label_fail": "⚠️ 综合结论（存在分歧）",
+        "key_disagree_label":"⚔️ 核心分歧",
+        "agreement_score":   "一致度",
         "expand_debate":     "📖 查看完整辩论过程",
         "meta_cost":         "总费用",
         "empty_title":       "输入问题，开始 AI 交叉验证",
@@ -109,16 +128,20 @@ T = {
         "refined_label":     "✏️ 修正答案：",
         "agrees_tag":        "✅ 同意",
         "disagrees_tag":     "❌ 不同意",
-        "image_label":       "📷 上传图片（可选）",
-        "image_caption":     "上传题目截图或拍照",
-        "image_attached":    "📷 已上传图片：{name}",
-        "image_only_q":      "请分析并回答图片中的问题。",
-        "status_image":      "📷 已附图片",
+        "followup_label":    "💬 追问",
+        "followup_ph":       "有不明白的地方？继续问……",
+        "followup_btn":      "提问",
+        "sidebar_title":     "📋 历史记录",
+        "sidebar_empty":     "暂无历史记录。",
+        "sidebar_clear":     "清空全部",
+        "sidebar_verified":  "✅",
+        "sidebar_disputed":  "⚠️",
+        "new_question":      "+ 新问题",
     },
 }
 
 # ═══════════════════════════════════════════════════════════
-# Custom CSS  (light, minimal, academic feel)
+# Custom CSS
 # ═══════════════════════════════════════════════════════════
 
 st.markdown("""
@@ -164,6 +187,33 @@ st.markdown("""
     padding: 0.75rem 1rem; border-radius: 0 8px 8px 0;
     font-size: 0.88rem; color: #475569; margin-bottom: 1rem;
 }
+.disagree-box {
+    background: #fff1f2; border: 1.5px solid #fecaca;
+    border-radius: 10px; padding: 0.7rem 1rem; margin-bottom: 0.8rem;
+    font-size: 0.88rem; color: #991b1b;
+}
+.disagree-label {
+    font-size: 0.7rem; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.07em; color: #dc2626; margin-bottom: 4px;
+}
+.score-bar-wrap {
+    background: #f1f5f9; border-radius: 8px; height: 8px;
+    width: 100%; margin: 4px 0 12px 0; overflow: hidden;
+}
+.score-bar-fill {
+    height: 8px; border-radius: 8px;
+    background: linear-gradient(90deg, #ef4444, #f59e0b, #22c55e);
+}
+.followup-box {
+    background: #f8fafc; border: 1.5px solid #e2e8f0;
+    border-radius: 14px; padding: 1rem 1.2rem; margin-top: 1.2rem;
+}
+.followup-answer {
+    background: #eff6ff; border-left: 3px solid #6366f1;
+    border-radius: 0 8px 8px 0; padding: 0.75rem 1rem;
+    font-size: 0.92rem; color: #1e293b; line-height: 1.7;
+    margin-top: 0.5rem; margin-bottom: 0.8rem;
+}
 .round-divider {
     text-align: center; font-size: 0.72rem; font-weight: 600;
     color: #cbd5e1; margin: 16px 0 10px 0; letter-spacing: 0.06em;
@@ -185,9 +235,14 @@ st.markdown("""
 .tag-agree    { color: #16a34a; font-weight: 700; font-size: 0.82rem; }
 .tag-disagree { color: #dc2626; font-weight: 700; font-size: 0.82rem; }
 .tag-conf     { color: #6366f1; font-size: 0.78rem; }
+.tag-score    { color: #f59e0b; font-size: 0.78rem; }
 .refined-note {
     color: #6366f1; font-size: 0.8rem; margin-top: 5px;
     border-top: 1px solid #e0e7ff; padding-top: 5px;
+}
+.key-dis-inline {
+    color: #dc2626; font-size: 0.78rem; margin-top: 4px;
+    border-top: 1px solid #fecaca; padding-top: 4px;
 }
 .empty-state  { text-align: center; padding: 3.5rem 1rem; color: #94a3b8; }
 .empty-icon   { font-size: 2.8rem; margin-bottom: 0.8rem; }
@@ -200,10 +255,16 @@ st.markdown("""
 # Session state
 # ═══════════════════════════════════════════════════════════
 
-if "result" not in st.session_state:
-    st.session_state.result = None
-if "lang" not in st.session_state:
-    st.session_state.lang = "zh"
+defaults = {
+    "result":        None,
+    "lang":          "zh",
+    "followups":     [],
+    "active_q":      "",
+    "active_models": [],
+}
+for k, v in defaults.items():
+    if k not in st.session_state:
+        st.session_state[k] = v
 
 # ═══════════════════════════════════════════════════════════
 # Helpers
@@ -228,17 +289,12 @@ def bubble_class(model: str, models: list) -> str:
 def render_debate_log(debate_log: list, model_a: str, model_b: str):
     models = [model_a, model_b]
     for entry in debate_log:
-        rnd = entry["round"]
-        if rnd == 0:
-            header = t("round0_header")
-        else:
-            header = t("roundn_header", n=rnd)
-
+        rnd    = entry["round"]
+        header = t("round0_header") if rnd == 0 else t("roundn_header", n=rnd)
         st.markdown(
             f'<div class="round-divider">─── {header} ───</div>',
             unsafe_allow_html=True,
         )
-
         for model, res in entry["responses"].items():
             bc = bubble_class(model, models) if model in models else "bubble-left"
             if not res.get("ok"):
@@ -248,7 +304,6 @@ def render_debate_log(debate_log: list, model_a: str, model_b: str):
                     unsafe_allow_html=True,
                 )
                 continue
-
             d = res["data"]
             if rnd == 0:
                 conf      = d.get("confidence", 0)
@@ -264,15 +319,56 @@ def render_debate_log(debate_log: list, model_a: str, model_b: str):
                     content += f'<div style="color:#94a3b8;font-size:0.8rem;margin-top:5px">💭 {reasoning}{ellipsis}</div>'
             else:
                 agrees   = d.get("agrees", False)
+                score    = d.get("agreement_score")
+                key_dis  = d.get("key_disagreement") or ""
                 critique = (d.get("critique", "") or "").replace("\n", "<br>")
                 refined  = d.get("refined_answer", "") or ""
                 atag     = f'<span class="tag-agree">{t("agrees_tag")}</span>' if agrees else f'<span class="tag-disagree">{t("disagrees_tag")}</span>'
-                content  = f'<div class="bubble-name">{icon(model)} {model} {atag}</div>{critique}'
+                stag     = f'<span class="tag-score">· {t("agreement_score")} {score}%</span>' if score is not None else ""
+                content  = f'<div class="bubble-name">{icon(model)} {model} {atag} {stag}</div>{critique}'
+                if key_dis and not agrees:
+                    content += f'<div class="key-dis-inline">⚔️ {key_dis}</div>'
                 if refined and not agrees:
                     short    = refined[:200] + ("…" if len(refined) > 200 else "")
                     content += f'<div class="refined-note">{t("refined_label")} {short}</div>'
-
             st.markdown(f'<div class="{bc}">{content}</div>', unsafe_allow_html=True)
+
+# ═══════════════════════════════════════════════════════════
+# Sidebar — History
+# ═══════════════════════════════════════════════════════════
+
+with st.sidebar:
+    st.markdown(f"### {t('sidebar_title')}")
+
+    if st.button(t("new_question"), use_container_width=True):
+        st.session_state.result        = None
+        st.session_state.followups     = []
+        st.session_state.active_q      = ""
+        st.session_state.active_models = []
+        st.rerun()
+
+    history = db.get_history(30)
+    if not history:
+        st.caption(t("sidebar_empty"))
+    else:
+        for row in history:
+            badge   = t("sidebar_verified") if row["converged"] else t("sidebar_disputed")
+            q_short = row["question"][:55] + ("…" if len(row["question"]) > 55 else "")
+            label   = f"{badge} {q_short}"
+            if st.button(label, key=f"hist_{row['id']}", help=row["created_at"][:10], use_container_width=True):
+                session = db.get_session(row["id"])
+                if session and session.get("result"):
+                    st.session_state.result        = session["result"]
+                    st.session_state.active_q      = session["question"]
+                    st.session_state.active_models = [session["model_a"], session["model_b"]]
+                    st.session_state.followups     = []
+                    st.session_state.lang          = session.get("lang", "zh")
+                    st.rerun()
+
+        st.divider()
+        if st.button(t("sidebar_clear"), use_container_width=True):
+            db.clear_history()
+            st.rerun()
 
 # ═══════════════════════════════════════════════════════════
 # Header
@@ -283,7 +379,6 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# ── Language toggle (renders FIRST so everything below reacts) ──
 lang_choice = st.radio(
     t("lang_label"),
     options=["中文", "English"],
@@ -299,11 +394,10 @@ st.markdown(
 )
 
 # ═══════════════════════════════════════════════════════════
-# Model selector  (pick exactly 2)
+# Model selector
 # ═══════════════════════════════════════════════════════════
 
 api_status = core.get_api_status()
-
 st.markdown(f'<p class="sec-label">{t("select_models")}</p>', unsafe_allow_html=True)
 c1, c2, c3 = st.columns(3)
 selected_models = []
@@ -330,7 +424,7 @@ elif len(selected_models) > 2:
     st.warning(t("err_too_many", n=len(selected_models)))
 
 # ═══════════════════════════════════════════════════════════
-# Question input
+# Question input + image upload
 # ═══════════════════════════════════════════════════════════
 
 st.markdown("<br>", unsafe_allow_html=True)
@@ -343,7 +437,6 @@ question = st.text_area(
     key="question_input",
 )
 
-# ── Image upload (optional) ─────────────────────────────
 uploaded_img = st.file_uploader(
     t("image_label"),
     type=["png", "jpg", "jpeg", "gif", "webp"],
@@ -376,19 +469,17 @@ with col_hint:
         st.caption(f"{icon(ma)} {ma} vs {icon(mb)} {mb} · {t('hint_models')}")
 
 # ═══════════════════════════════════════════════════════════
-# Run debate with real-time status display
+# Run debate
 # ═══════════════════════════════════════════════════════════
 
 if run_btn and has_input and len(selected_models) == 2:
-    st.session_state.result = None
+    st.session_state.result    = None
+    st.session_state.followups = []
     model_a, model_b = selected_models[0], selected_models[1]
-    # Snapshot lang at run time so on_update uses same language throughout
-    run_lang = st.session_state.lang
-    # Effective question text (fallback if image-only)
+    run_lang    = st.session_state.lang
     effective_q = question.strip() or t("image_only_q")
 
     with st.status(t("status_running"), expanded=True) as status:
-
         q_display = question.strip() or f"[{t('status_image')}]"
         st.write(f"{t('status_question')}{q_display[:100]}{'…' if len(q_display) > 100 else ''}")
         if image_b64:
@@ -400,13 +491,12 @@ if run_btn and has_input and len(selected_models) == 2:
             if event == "round_complete":
                 rnd       = data["round"]
                 responses = data["responses"]
-
                 if rnd == 0:
                     st.write(T[run_lang]["round0_done"])
                     for model, res in responses.items():
                         if res.get("ok"):
-                            conf    = res["data"].get("confidence", 0)
-                            preview = (res["data"].get("answer") or "")[:100]
+                            conf     = res["data"].get("confidence", 0)
+                            preview  = (res["data"].get("answer") or "")[:100]
                             ellipsis = "…" if len(res["data"].get("answer", "")) > 100 else ""
                             st.write(f"  {icon(model)} **{model}** ({T[run_lang]['confidence']} {conf}%): {preview}{ellipsis}")
                         else:
@@ -416,12 +506,11 @@ if run_btn and has_input and len(selected_models) == 2:
                     for model, res in responses.items():
                         if res.get("ok"):
                             agrees = res["data"].get("agrees", False)
+                            score  = res["data"].get("agreement_score", "?")
                             mark   = T[run_lang]["agrees"] if agrees else T[run_lang]["disagrees"]
-                            st.write(f"  {icon(model)} **{model}**: {mark}")
-
+                            st.write(f"  {icon(model)} **{model}**: {mark} · score {score}%")
             elif event == "converged":
                 st.write(T[run_lang]["converged_msg"].format(n=data["round"]))
-
             elif event == "max_rounds":
                 st.write(T[run_lang]["max_rounds_msg"])
 
@@ -437,7 +526,10 @@ if run_btn and has_input and len(selected_models) == 2:
         else:
             status.update(label=T[run_lang]["status_done_fail"].format(cost=cost_str), state="complete", expanded=False)
 
-    st.session_state.result = result
+    db.save_session(effective_q, result, lang=run_lang)
+    st.session_state.result        = result
+    st.session_state.active_q      = effective_q
+    st.session_state.active_models = [model_a, model_b]
 
 # ═══════════════════════════════════════════════════════════
 # Display results
@@ -465,11 +557,43 @@ if result:
             unsafe_allow_html=True,
         )
 
+    # ── Key disagreement highlight ────────────────────────
+    key_dis = result.get("key_disagreement", "") or ""
+    if key_dis and not converged:
+        st.markdown(
+            f'<div class="disagree-box">'
+            f'<div class="disagree-label">{t("key_disagree_label")}</div>'
+            f'{key_dis}'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+
+    # ── Agreement score bar ───────────────────────────────
+    last_round = next(
+        (e for e in reversed(result.get("debate_log", [])) if e["round"] > 0),
+        None
+    )
+    if last_round:
+        scores = [
+            r["data"].get("agreement_score", 0)
+            for r in last_round["responses"].values()
+            if r.get("ok") and r["data"].get("agreement_score") is not None
+        ]
+        if scores:
+            avg_score = int(sum(scores) / len(scores))
+            st.markdown(
+                f'<div style="font-size:0.78rem;color:#94a3b8;margin-bottom:2px">'
+                f'{t("agreement_score")}: <b>{avg_score}%</b></div>'
+                f'<div class="score-bar-wrap">'
+                f'<div class="score-bar-fill" style="width:{avg_score}%"></div>'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
+
     # ── Final answer ──────────────────────────────────────
     box_class  = "answer-box-verified" if converged else "answer-box-disputed"
     box_label  = t("answer_label_ok") if converged else t("answer_label_fail")
     final_html = (result.get("final_answer") or "").replace("\n", "<br>")
-
     st.markdown(
         f'<div class="{box_class}">'
         f'<div class="answer-label">{box_label}</div>'
@@ -486,19 +610,65 @@ if result:
             unsafe_allow_html=True,
         )
 
-    # ── Full debate log (expandable) ──────────────────────
+    # ── Full debate log ───────────────────────────────────
     with st.expander(t("expand_debate"), expanded=False):
         render_debate_log(result.get("debate_log", []), model_a, model_b)
 
     # ── Meta bar ──────────────────────────────────────────
     cost = result.get("total_cost", 0)
     st.markdown(
-        f'<p style="font-size:0.76rem;color:#cbd5e1;margin-top:1rem;">'
+        f'<p style="font-size:0.76rem;color:#cbd5e1;margin-top:0.5rem;">'
         f'💰 {t("meta_cost")} ${cost:.4f} · '
         f'{icon(model_a)} {model_a} vs {icon(model_b)} {model_b}'
         f'</p>',
         unsafe_allow_html=True,
     )
+
+    # ── Follow-up conversation ────────────────────────────
+    st.markdown('<div class="followup-box">', unsafe_allow_html=True)
+    st.markdown(f'<p class="sec-label">{t("followup_label")}</p>', unsafe_allow_html=True)
+
+    for fu in st.session_state.followups:
+        st.markdown(f"**{fu['question']}**")
+        st.markdown(
+            f'<div class="followup-answer">{fu["answer"].replace(chr(10), "<br>")}</div>',
+            unsafe_allow_html=True,
+        )
+
+    fu_col1, fu_col2 = st.columns([4, 1])
+    with fu_col1:
+        fu_input = st.text_input(
+            "followup",
+            label_visibility="collapsed",
+            placeholder=t("followup_ph"),
+            key="fu_input",
+        )
+    with fu_col2:
+        fu_btn = st.button(
+            t("followup_btn"),
+            disabled=not fu_input.strip(),
+            use_container_width=True,
+        )
+
+    if fu_btn and fu_input.strip():
+        fu_model = st.session_state.active_models[0] if st.session_state.active_models else model_a
+        with st.spinner("…"):
+            fu_result = core.run_followup(
+                original_question = st.session_state.active_q,
+                debate_result     = result,
+                followup_question = fu_input.strip(),
+                model             = fu_model,
+                lang              = st.session_state.lang,
+            )
+        if fu_result["ok"]:
+            st.session_state.followups.append({
+                "question": fu_input.strip(),
+                "answer":   fu_result["answer"],
+                "cost":     fu_result["cost"],
+            })
+        st.rerun()
+
+    st.markdown('</div>', unsafe_allow_html=True)
 
 elif not run_btn:
     st.markdown(
