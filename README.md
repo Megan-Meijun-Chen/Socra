@@ -1,0 +1,297 @@
+# ✦ Socra — AI Answer Verifier
+
+> *Not sure if AI's answer is right? Let another AI challenge it.*
+> 不确定 AI 的答案对不对？让另一个 AI 来挑战它。
+
+[![Python](https://img.shields.io/badge/Python-3.10%2B-blue?logo=python)](https://www.python.org/)
+[![Streamlit](https://img.shields.io/badge/Streamlit-1.35%2B-red?logo=streamlit)](https://streamlit.io/)
+[![Claude](https://img.shields.io/badge/Claude-Anthropic-orange)](https://www.anthropic.com/)
+[![GPT-4o](https://img.shields.io/badge/GPT--4o-OpenAI-green)](https://openai.com/)
+[![Gemini](https://img.shields.io/badge/Gemini-Google-blue)](https://deepmind.google/technologies/gemini/)
+
+---
+
+## What is Socra?
+
+Socra is a **multi-agent AI debate engine** built for students and anyone who wants to *verify* an AI answer before trusting it.
+
+Instead of asking one AI and hoping it's right, Socra asks **two AI models** the same question independently — then has them **cross-examine each other's answers** across multiple rounds until they converge on a verified answer or surface a genuine disagreement.
+
+The name is inspired by **Socrates** and the Socratic method: truth emerges through rigorous questioning and dialogue, not from a single voice.
+
+---
+
+## Why Socra?
+
+Students increasingly use AI for homework help — but AI models hallucinate, make arithmetic errors, and confidently give wrong answers. Socra addresses this by:
+
+- **Eliminating single-point-of-failure**: if one model is wrong, the other catches it
+- **Making reasoning visible**: you see *why* the models agree or disagree, not just the final answer
+- **Supporting image input**: photograph your textbook problem, no retyping needed
+- **Working in English and Chinese**: full bilingual UI and AI response support
+
+---
+
+## How It Works — The Debate Protocol
+
+Socra is built on the **Multi-Agent Debate** pattern (Du et al., 2023, MIT/CMU), adapted for a consumer-facing verification workflow:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  ROUND 0 — Independent Answers (parallel)                   │
+│  Model A answers ──┐                                        │
+│                    ├──► both answers logged                 │
+│  Model B answers ──┘                                        │
+└─────────────────────────────────────────────────────────────┘
+                          │
+                          ▼
+┌─────────────────────────────────────────────────────────────┐
+│  ROUNDS 1–3 — Cross-Examination (parallel)                  │
+│  Model A sees B's answer → critiques → refines own answer   │
+│  Model B sees A's answer → critiques → refines own answer   │
+│                                                             │
+│  If BOTH models output "agrees": true → CONVERGED ✅        │
+│  Otherwise → next round (max 3 rounds)                      │
+└─────────────────────────────────────────────────────────────┘
+                          │
+                          ▼
+┌─────────────────────────────────────────────────────────────┐
+│  SYNTHESIS — Final Answer                                   │
+│  Claude summarizes the full debate into a clean,            │
+│  verified answer + one-line verification summary            │
+└─────────────────────────────────────────────────────────────┘
+```
+
+All model calls within each round run **in parallel** (via `ThreadPoolExecutor`), so multi-round debates are fast.
+
+---
+
+## Features
+
+| Feature | Details |
+|---|---|
+| **Multi-Agent Debate** | Up to 3 rounds of cross-examination; stops early on consensus |
+| **3 Model Options** | Claude (Anthropic), GPT-4o (OpenAI), Gemini 2.0 Flash (Google) |
+| **Image Input** | Upload a photo of your question — all 3 APIs support vision |
+| **Real-Time Streaming** | Watch each round appear as it completes |
+| **Bilingual** | Full EN/ZH toggle — UI language + AI response language |
+| **Cost Tracking** | Per-session token cost displayed after each run |
+| **Convergence Detection** | Auto-stops when both models agree; reports divergence if they don't |
+
+---
+
+## Screenshots
+
+### Main Interface
+The clean, academic-feel UI with model selector and question input:
+
+```
+✦ Socra                                    [中文 / English]
+Not sure if AI's answer is right? Let another AI challenge it.
+
+[ SELECT TWO MODELS TO DEBATE ]
+☑ 🟠 Claude   ☑ 🟢 GPT-4   ☐ 🔵 Gemini
+
+[ YOUR QUESTION                              ]
+[ Type your question here, or upload a photo ]
+[                                            ]
+
+📷 Upload image (optional)
+
+[ ▶ Verify ]   🟠 Claude vs 🟢 GPT-4 · max 3 debate rounds
+```
+
+### Results View
+```
+✅ Verified — consensus after 2 round(s)
+
+┌─────────────────────────────────────────┐
+│ ✅ VERIFIED ANSWER                       │
+│ The answer is 42. Here's why: ...       │
+└─────────────────────────────────────────┘
+
+📋 Both models independently reached the same conclusion after
+   reviewing each other's reasoning in round 2.
+
+📖 Show full debate ▼
+```
+
+---
+
+## Tech Stack
+
+| Layer | Technology |
+|---|---|
+| **UI Framework** | Streamlit 1.35+ |
+| **AI APIs** | Anthropic `claude-opus-4-5`, OpenAI `gpt-4o`, Google `gemini-2.0-flash` |
+| **Concurrency** | `concurrent.futures.ThreadPoolExecutor` — parallel model calls per round |
+| **Retry Logic** | `tenacity` — exponential backoff, 3 attempts per call |
+| **Token Counting** | `tiktoken` (cl100k_base encoding) |
+| **Environment** | `python-dotenv` |
+| **Image Support** | Base64 encoding — native vision APIs on all 3 providers |
+
+---
+
+## Project Structure
+
+```
+socra/
+├── socra_core.py      # Debate engine — all AI logic, zero UI dependencies
+│   ├── _call_claude() / _call_gpt4() / _call_gemini()   # vision-capable callers
+│   ├── call_model()                                      # unified interface
+│   ├── run_debate()                                      # main orchestration loop
+│   └── _synthesize()                                     # final answer generation
+│
+├── socra_ui.py        # Streamlit UI — bilingual, real-time, light theme
+│   ├── Translation dict T (en/zh) + t() helper
+│   ├── Model selector (checkboxes, exactly 2)
+│   ├── Question input (text + image upload)
+│   ├── Real-time debate status (st.status)
+│   └── Results display (badge + answer box + debate log)
+│
+├── requirements.txt   # Python dependencies
+├── .env               # API keys (not committed — see setup below)
+└── README.md
+```
+
+---
+
+## Setup
+
+### 1. Clone the repo
+
+```bash
+git clone https://github.com/Megan-Chen/socra.git
+cd socra
+```
+
+### 2. Install dependencies
+
+```bash
+pip install -r requirements.txt
+```
+
+**requirements.txt** includes:
+```
+anthropic>=0.40.0
+openai>=1.50.0
+google-generativeai>=0.8.0
+streamlit>=1.35.0
+tenacity>=8.2.3
+python-dotenv>=1.0.0
+tiktoken>=0.7.0
+```
+
+### 3. Configure API keys
+
+Create a `.env` file in the `socra/` directory:
+
+```env
+ANTHROPIC_API_KEY=sk-ant-...
+OPENAI_API_KEY=sk-...
+GOOGLE_API_KEY=AIza...
+```
+
+You only need keys for the models you want to use — Socra auto-detects which models are available and disables unconfigured ones.
+
+**Get your API keys here:**
+- Anthropic (Claude): https://console.anthropic.com/
+- OpenAI (GPT-4o): https://platform.openai.com/api-keys
+- Google (Gemini): https://aistudio.google.com/app/apikey
+
+### 4. Run
+
+```bash
+streamlit run socra_ui.py
+```
+
+Open http://localhost:8501 in your browser.
+
+---
+
+## Usage Guide
+
+### Text Question
+1. Select exactly **2 models** from the checkboxes at the top
+2. Type your question in the text box
+3. Click **▶ Verify** (or **▶ 开始验证** in Chinese mode)
+4. Watch the debate happen in real time
+5. Read the verified answer — green badge means consensus, yellow means diverged
+
+### Image Question
+1. Select your 2 models
+2. Optionally type any additional context in the text box
+3. Click **📷 Upload image** and attach a photo of your question (PNG, JPG, WEBP, GIF)
+4. Click **▶ Verify** — the image is sent to all models in every round
+
+### Language Toggle
+The **中文 / English** radio at the top switches:
+- All UI text (labels, buttons, status messages)
+- The language the AI models respond in (injected into system prompts)
+
+### Reading the Results
+
+| Badge | Meaning |
+|---|---|
+| ✅ Verified — consensus after N round(s) | Both models agreed. High confidence answer. |
+| ⚠️ Diverged — models did not fully agree | Models disagreed after max rounds. Read the debate log carefully. |
+
+Click **📖 Show full debate** to see each round's answers, critiques, and whether each model agreed or disagreed.
+
+---
+
+## Architecture Notes
+
+### Why parallel calls?
+Without parallelism, a 3-round debate would take ~3 × 2 × (API latency) ≈ 18–24 seconds sequentially. With `ThreadPoolExecutor(max_workers=2)`, each round's two model calls run simultaneously, cutting that to ~9–12 seconds.
+
+### Thread safety in debate rounds
+Each round passes the previous round's data to the next. To prevent race conditions, we snapshot both models' answers before dispatching to the thread pool:
+
+```python
+snap_a = json.dumps(prev[model_a], ensure_ascii=False)
+snap_b = json.dumps(prev[model_b], ensure_ascii=False)
+# worker threads read snap_a / snap_b — immutable strings
+```
+
+### Language consistency
+Both models are forced to respond in the same language via a mandatory instruction injected into all three system prompts (`_build_systems(lang)`). This prevents one model answering in English and one in Chinese when the question is ambiguous.
+
+### Image in debate rounds
+When a question image is provided, it is re-attached to every model call in every round — including cross-examination rounds. This ensures models can re-examine the original image when evaluating each other's answers, not just work from text transcriptions.
+
+---
+
+## Resume Description (for job applications)
+
+> **Socra — Multi-Agent AI Answer Verifier** | Python, Streamlit, Anthropic/OpenAI/Gemini APIs
+>
+> - Built a multi-agent debate engine where two LLMs (Claude, GPT-4o, Gemini) independently answer a question, then cross-examine each other's answers across up to 3 rounds until convergence is detected
+> - Designed multi-turn session architecture with parallel execution (`ThreadPoolExecutor`), thread-safe state snapshots, convergence detection, and real-time streaming UI via `st.status()`
+> - Integrated vision/image input across all three model APIs using provider-specific formats (base64 content blocks for Claude, data URLs for GPT-4, inline blobs for Gemini)
+> - Engineered prompt templates with language injection (EN/ZH), JSON-structured outputs, and exponential retry logic; built full bilingual Streamlit UI with live debate visualization
+
+---
+
+## Roadmap
+
+- [ ] FastAPI backend to decouple from Streamlit (enable mobile/web clients)
+- [ ] PostgreSQL conversation history (persistent session memory)
+- [ ] LangGraph integration for more complex multi-agent flows
+- [ ] WebSocket support for true real-time streaming
+- [ ] Export debate as PDF report
+- [ ] Support for 3-model triangulation (all 3 models debate simultaneously)
+
+---
+
+## About
+
+Built by [Megan Chen](https://github.com/Megan-Chen) as an independent AI project.
+
+Inspired by: *Improving Factuality and Reasoning in Language Models through Multiagent Debate* (Du et al., 2023, MIT/CMU)
+
+---
+
+## License
+
+MIT
